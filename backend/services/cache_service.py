@@ -23,6 +23,28 @@ from loguru import logger
 from backend.utils.config import settings
 
 
+class _InMemoryCacheClient:
+    """轻量级内存缓存，仅用于 Mock/降级场景"""
+
+    def __init__(self):
+        self._store: dict[str, str] = {}
+
+    def ping(self) -> bool:
+        return True
+
+    def get(self, name: str) -> Optional[str]:
+        return self._store.get(name)
+
+    def setex(self, name: str, ttl: int, value: str) -> None:
+        self._store[name] = value
+
+    def info(self, section: str = "memory") -> dict:
+        return {"used_memory_human": "0B"}
+
+    def dbsize(self) -> int:
+        return len(self._store)
+
+
 class CacheService:
     """Redis 缓存封装"""
 
@@ -33,22 +55,44 @@ class CacheService:
         db: int = None,
         password: str = None,
     ):
-        self._client = redis.Redis(
-            host=host or settings.redis.host,
-            port=port or settings.redis.port,
-            db=db if db is not None else settings.redis.db,
-            password=password or settings.redis.password,
-            decode_responses=True,
-            socket_connect_timeout=5,
-            retry_on_timeout=True,
-        )
+        self._using_fallback = False
+        self._client = self._create_client(host, port, db, password)
+
+    def _create_client(
+        self,
+        host: str,
+        port: int,
+        db: int,
+        password: str,
+    ):
+        if settings.llm.mock_mode or not settings.cache.enabled:
+            logger.debug("CacheService: mock mode or cache disabled, using in-memory cache")
+            self._using_fallback = True
+            return _InMemoryCacheClient()
+
+        try:
+            client = redis.Redis(
+                host=host or settings.redis.host,
+                port=port or settings.redis.port,
+                db=db if db is not None else settings.redis.db,
+                password=password or settings.redis.password,
+                decode_responses=True,
+                socket_connect_timeout=5,
+                retry_on_timeout=True,
+            )
+            client.ping()
+            return client
+        except Exception as exc:
+            logger.warning(f"Redis 初始化失败，降级到内存缓存: {exc}")
+            self._using_fallback = True
+            return _InMemoryCacheClient()
 
     # ── 健康检查 ──────────────────────────
 
     def ping(self) -> bool:
         try:
             return self._client.ping()
-        except redis.ConnectionError:
+        except Exception:
             return False
 
     # ── 文本缓存 ──────────────────────────
@@ -124,12 +168,20 @@ class CacheService:
     def get_cache_stats(self) -> dict:
         """返回 Redis 连接和缓存统计信息"""
         try:
-            info = self._client.info("memory")
             keys_count = self._client.dbsize()
+        except Exception as exc:
+            return {"connected": False, "error": str(exc)}
+
+        if self._using_fallback:
             return {
-                "connected": True,
-                "used_memory_human": info.get("used_memory_human", "N/A"),
+                "connected": False,
+                "mode": "in-memory",
                 "total_keys": keys_count,
             }
-        except Exception as e:
-            return {"connected": False, "error": str(e)}
+
+        info = self._client.info("memory")
+        return {
+            "connected": True,
+            "used_memory_human": info.get("used_memory_human", "N/A"),
+            "total_keys": keys_count,
+        }

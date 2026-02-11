@@ -22,6 +22,7 @@ from backend.models.schemas import (
 )
 from backend.services.cache_service import CacheService
 from backend.tasks.analysis import full_analysis_task
+from backend.utils.config import settings
 
 router = APIRouter(prefix="/analysis", tags=["分析"])
 
@@ -93,6 +94,14 @@ async def get_progress(task_id: str):
             progress=progress["progress"],
             current_step=progress.get("current_step", ""),
             updated_at=progress.get("updated_at"),
+        )
+
+    if settings.llm.mock_mode:
+        return ProgressResponse(
+            task_id=task_id,
+            status=TaskStatus.PENDING,
+            progress=0.0,
+            current_step="mock 模式，状态模拟",
         )
 
     # 回退到查 Celery AsyncResult

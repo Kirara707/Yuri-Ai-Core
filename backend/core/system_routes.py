@@ -11,7 +11,7 @@ from loguru import logger
 
 from backend.models.schemas import HealthResponse, MetricsResponse
 from backend.services.cache_service import CacheService
-from backend.services.llm_service import get_breaker_status
+from backend.services.llm_service import get_breaker_status, is_mock_active, get_mock_stats
 from backend.services.metrics_service import metrics
 from backend.utils.config import settings
 
@@ -38,8 +38,14 @@ async def health_check():
         logger.debug(f"DB 健康检查失败: {e}")
 
     # BERT 模型是否已加载
-    from backend.services.bert_service import _model
-    bert_loaded = _model is not None
+    bert_loaded = False
+    if not settings.llm.mock_mode:
+        try:
+            from backend.services.bert_service import _model
+
+            bert_loaded = _model is not None
+        except Exception as exc:
+            logger.debug(f"BERT 模型模块加载失败: {exc}")
 
     overall = "ok" if redis_ok else "degraded"
 
@@ -69,3 +75,14 @@ async def breaker_status():
     LLM 熔断器当前状态
     """
     return get_breaker_status()
+
+
+@router.get("/mock-status")
+async def mock_status():
+    """
+    LLM Mock 模式状态 & 调用统计
+    """
+    return {
+        "mock_active": is_mock_active(),
+        "stats": get_mock_stats(),
+    }
