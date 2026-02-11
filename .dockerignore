@@ -1,0 +1,40 @@
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 环境
+.env
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 日志
+logs/*.log
+logs/*.json
+
+# 模型权重（很大）
+models/checkpoint-*/model.safetensors
+models/checkpoint-*/optimizer.pt
+
+# Docker 挂载数据
+redis_data/
+postgres_data/
+
+# 测试
+.pytest_cache/
+htmlcov/
+.coverage
+
+# 临时文件
+*.tmp
+*.bak

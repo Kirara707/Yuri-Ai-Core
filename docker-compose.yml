@@ -1,0 +1,134 @@
+# ============================================
+# Yuri AI Core — Docker Compose
+# ============================================
+# 服务:
+#   1. api        — FastAPI 主应用
+#   2. worker     — Celery Worker
+#   3. beat       — Celery Beat 定时任务（预留）
+#   4. redis      — 缓存 & 消息队列
+#   5. postgres   — 持久化存储
+#   6. flower     — Celery 监控面板
+# ============================================
+
+version: "3.9"
+
+services:
+  # ── Redis ───────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: yuri-redis
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # ── PostgreSQL ──────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: yuri-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-yuri_db}
+      POSTGRES_USER: ${POSTGRES_USER:-yuri}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-yuri_password}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-yuri}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ── FastAPI 主应用 ──────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: yuri-api
+    env_file:
+      - .env
+    environment:
+      - REDIS_HOST=redis
+      - POSTGRES_HOST=postgres
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./models:/app/models:ro
+      - ./logs:/app/logs
+      - ./csv:/app/csv
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── Celery Worker ──────────────────────
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: yuri-worker
+    command: celery -A backend.tasks.celery_app:celery_app worker --loglevel=info --concurrency=4 -Q analysis
+    env_file:
+      - .env
+    environment:
+      - REDIS_HOST=redis
+      - POSTGRES_HOST=postgres
+    volumes:
+      - ./models:/app/models:ro
+      - ./logs:/app/logs
+      - ./csv:/app/csv
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── Celery Beat（定时任务，预留）────────
+  beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: yuri-beat
+    command: celery -A backend.tasks.celery_app:celery_app beat --loglevel=info
+    env_file:
+      - .env
+    environment:
+      - REDIS_HOST=redis
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── Flower 监控面板 ────────────────────
+  flower:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: yuri-flower
+    command: celery -A backend.tasks.celery_app:celery_app flower --port=5555
+    env_file:
+      - .env
+    environment:
+      - REDIS_HOST=redis
+    ports:
+      - "5555:5555"
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  redis_data:
+  postgres_data:

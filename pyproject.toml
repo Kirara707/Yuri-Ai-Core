@@ -1,0 +1,29 @@
+[project]
+name = "yuri-ai-core"
+version = "1.0.0"
+description = "百合文学智能分析平台"
+requires-python = ">=3.10"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]
+exclude = ["models/", "txt/", "csv/"]
+
+[tool.ruff.isort]
+known-first-party = ["backend", "script"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "-v --tb=short"
+markers = [
+    "slow: 标记执行较慢的测试",
+    "integration: 集成测试（需要外部服务）",
+]
